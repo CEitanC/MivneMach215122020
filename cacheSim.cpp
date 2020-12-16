@@ -67,9 +67,12 @@ int main(int argc, char **argv) {
 			return 0;
 		}
 	}
-
+	//create the cache
+	bool write_alloc = true;
+	if (WrAlloc == 0) { write_alloc = false; }
+	Cache MyCache(MemCyc, BSize, BSize, L1Size, L2Size, L1Assoc, L2Assoc, L1Cyc, L2Cyc, write_alloc);
+	// finished to create
 	while (getline(file, line)) {
-
 		stringstream ss(line);
 		string address;
 		char operation = 0; // read (R) or write (W)
@@ -92,12 +95,14 @@ int main(int argc, char **argv) {
 
 		// DEBUG - remove this line
 		cout << " (dec) " << num << endl;
+		if (operation == 'R') { MyCache.Read(num); }
+		if (operation == 'W') { MyCache.Write(num); }
 
 	}
-
-	double L1MissRate;
-	double L2MissRate;
-	double avgAccTime;
+	
+	double L1MissRate = MyCache.Get_L1_Rate();
+	double L2MissRate = MyCache.Get_L2_Rate();
+	double avgAccTime = MyCache.Avg_Time();
 
 	printf("L1miss=%.03f ", L1MissRate);
 	printf("L2miss=%.03f ", L2MissRate);
@@ -105,68 +110,4 @@ int main(int argc, char **argv) {
 
 	return 0;
 }
-
-class Level {
-	unsigned Mem_Cycle;
-	unsigned Block_Size;
-	unsigned Level_Size;
-	unsigned L_Assoc;
-	unsigned Level_Cyc;
-	unsigned Write_Alloc;
-	//Level* Higher_L;
-	//Level* Lower_L;
-	unsigned Tot_Time;
-	unsigned Block_in_Way;
-	unsigned Request_Num;
-	unsigned Hits;
-	unsigned Miss;
-	unsigned Set_Size;
-	unsigned Ways_Num;
-	vector<vector<unsigned>> Tag_Vec;
-	vector<vector<bool>> Valid_Vec;
-	vector<vector<bool>> Dirty_Vec;
-	vector<vector<unsigned>> LRU_Vec;
-
-
-
-public:
-	//counstructor
-	Level(unsigned mem_cyc, unsigned block_size, unsigned write_alloc, unsigned level_size, unsigned l_assoc,
-		unsigned level_cyc);
-
-	// Read
-	void Read(unsigned address, unsigned level_num, bool* valid_bit);
-
-	// Write
-	void Write(unsigned address, unsigned level_num);
-
-	//void Set_Higher_L(Level* L);
-	//void Set_Lower_L(Level* L);
-	double Get_Rate();
-	unsigned Get_Time();
-	void Get_Victim(unsigned adress, int* way, unsigned* block);
-	void Set_LRU(unsigned way, unsigned set);
-	unsigned Get_LRU(unsigned set);
-	bool Check_Adress_L(unsigned adress, unsigned* way);
-	unsigned GetSet(unsigned address);
-	unsigned GetTag(unsigned address);
-};
-
-class Cache {
-	Level L1;
-	Level L2;
-	unsigned Cnt_Requests;
-
-public:
-	//constructor
-	Cache(unsigned mem_cyc, unsigned block_size, unsigned L1_size, unsigned L2_size, unsigned L1_assoc,
-		unsigned L2_assoc, unsigned level1_cyc, unsigned level2_cyc, unsigned write_alloc);
-	void Read(unsigned address);
-	void Write(unsigned address);
-	double Get_L1_Rate();
-	double Get_L2_Rate();
-	double Avg_Time();
-	void snoop(Level higher_level, unsigned address);
-
-};
 

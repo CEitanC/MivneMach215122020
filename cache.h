@@ -48,7 +48,6 @@ public:
 	unsigned Get_Time();
 	unsigned Get_Victim(unsigned address); //try to change
 	void Set_LRU(unsigned way, unsigned set);//try to change
-	unsigned Get_LRU(unsigned set);
 	bool Is_Tag_in_Set(unsigned tag, unsigned set);
 	unsigned Which_Way_in_Set(unsigned tag, unsigned set);
 	unsigned GetSet(unsigned address);

@@ -1,8 +1,8 @@
 #include "cache.h"
-#include <vector>
 
 
-/*
+
+
 class Level {
 	vector<vector<BLOCK>> Table;
 	unsigned Block_Size;
@@ -37,7 +37,6 @@ public:
 	unsigned Get_Time();
 	unsigned Get_Victim(unsigned address); //try to change
 	void Set_LRU(unsigned way, unsigned set);//try to change
-	unsigned Get_LRU(unsigned set);
 	bool Is_Tag_in_Set(unsigned tag,unsigned set);
 	unsigned Which_Way_in_Set(unsigned tag, unsigned set);
 	unsigned GetSet(unsigned address);
@@ -48,7 +47,7 @@ public:
 	void Set_Valid(unsigned set, unsigned way,bool valid);
 	void Set_Drirty(unsigned set, unsigned way, bool dirty);
 };
-*/
+
 void Level::Set_Drirty(unsigned set, unsigned way, bool dirty) {
 	this->Table[set][way].dirty = dirty;
 	
@@ -129,7 +128,7 @@ unsigned Level::Which_Way_in_Set(unsigned tag, unsigned set)
 {
 	for (unsigned i = 0; i < this->Ways_Num; i++)
 	{
-		if (this->Table[set][i].tag == tag) {
+		if ((this->Table[set][i].tag == tag) && (this->Table[set][i].valid)) {
 			return this->Table[set][i].tag;
 		}
 	}
@@ -151,15 +150,26 @@ unsigned Level::Get_Victim(unsigned address) {
 			return i;
 		}
 	}
-	//in the case the cache is full
-	return this->Get_LRU(set);
+	//in the case the cache is full,choose the one with tne smallest LRU
+	unsigned min_val = this->Table[set][0].LRU;
+	unsigned min_index = 0;
+	for (unsigned i = 1; i < this->Ways_Num; i++)
+	{
+		if (this->Table[set][i].LRU < min_val)
+		{
+			min_val = this->Table[set][i].LRU;
+			min_index = i;
+		}
+	}
+	return min_index;
 }
 
 //update our way to be the last which was used 
 void Level::Set_LRU(unsigned way, unsigned set)
 {
+	unsigned current = this->Table[set][way].LRU;
 	for (unsigned i = 0; i < this->Ways_Num; i++) {
-		if (this->Table[set][i].LRU > this->Table[set][way].LRU)
+		if (this->Table[set][i].LRU > current)
 		{
 			this->Table[set][i].LRU--; 
 		}
@@ -169,20 +179,7 @@ void Level::Set_LRU(unsigned way, unsigned set)
 	return;
 }
 
-//find the way which wasn't used lately
-unsigned Level::Get_LRU(unsigned set) {
-	unsigned min_val= this->Table[set][0].LRU;
-	unsigned min_index = 0;
-	for(unsigned i=1;i<this->Ways_Num;i++)
-	{
-		if(this->Table[set][i].LRU<min_val)
-		{
-			min_val = this->Table[set][i];
-			min_index = i;
-		}
-	}
-	return min_index;
-}
+
 
 //return the current set
 unsigned Level::GetSet(unsigned address){
@@ -303,8 +300,10 @@ Cache::Cache(unsigned mem_cyc, unsigned block_size_L1, unsigned block_size_L2, u
 void Cache::snoop2(unsigned way, unsigned set) {
 	unsigned address_victim = this->L2.RecyckeAddress(set, way);
 	unsigned set_in_L1 = this->L1.GetSet(address_victim);
-	unsigned way_in_L1;
-	if ((this->L1.Check_Adress_L(address_victim, &way_in_L1) == true)) {
+	unsigned tag_in_L1 = this->L1.GetTag(address_victim);
+	
+	if ((this->L1.Is_Tag_in_Set(tag_in_L1,set_in_L1)== true)) {
+		unsigned way_in_L1 = this->L1.Which_Way_in_Set(tag_in_L1, set_in_L1);
 		this->L1.Set_Valid(set_in_L1, way_in_L1, false);
 	}
 	this->L2.Set_Valid(set, way, false);
@@ -339,7 +338,7 @@ void Cache::Write(unsigned address) {
 		unsigned tag_victim = this->L1.FindTag(set_L1, victim);
 		unsigned address = this->L1.RecyckeAddress(set_L1, victim);
 		
-		this->snoop1(address);
+		this->snoop1(victim, set_L1);
 		//assign "victim"
 		this->L1.Assign(address, victim,true); // check if need false or L2.dirty?
 		return;
@@ -353,10 +352,10 @@ void Cache::Write(unsigned address) {
 	}
 	//not write allocate
 	unsigned victim = this->L2.Get_Victim(address);
-	this->snoop(victim);
+	this->snoop2(victim);
 	this->L2.Assign(address, victim);
 	victim = this->L1.Get_Victim(address);
-	this->snoop(victim);
+	this->snoop1(victim, this->L1.GetSet(address));
 
 	this->L1.Assign(address, victim);
 	return;
@@ -365,35 +364,43 @@ void Cache::Write(unsigned address) {
 }
 
 void Cache::Read(unsigned address){
+	unsigned set1 = this->L1.GetSet(address);
+	unsigned set2 = this->L2.GetSet(address);
+	unsigned tag1 = this->L1.GetTag(address);
+	unsigned tag2 = this->L1.GetTag(address);
+
 	if (this->L1.Read(address)){//found in L1
 		return;
 	}
 	else if (this->L2.Read(address)){//found in L2, bring to L1
 		unsigned victim = this->L1.Get_Victim(address);
-		unsigned dirty = this->L1.FindDirty(address,victim);
+		this->snoop1(victim, set1);
+		unsigned way_in_L2 = this->L2.Which_Way_in_Set(tag2, set2);
+		unsigned dirty = this->L2.FindDirty(address, way_in_L2);
 		this->L1.Assign(address, victim, dirty);
 		return;
 	}
 	else{//bring from memory
 		this->cnt_memory_time += this->Mem_Cyc;
 		unsigned victim = this->L2.Get_Victim(address);
-		unsigned dirty= this->L2.FindDirty(address,victim);
-		this->L2.Assign(address, victim, dirty);
+		this->snoop2(victim, set2);
+		
+		this->L2.Assign(address, victim, false);
 		victim = this->L1.Get_Victim(address);
-		dirty = this->L1.FindDirty(address,victim);
-		this->L1.Assign(address, victim, dirty);
+		this->snoop1(victim, set1);
+		this->L1.Assign(address, victim, false);
 		return;
 	}
 }
 
 double Cache::Get_L1_Rate(){
-	return ((double)this->L1.Get_Num_Hits/(double)this->L1.Get_Num_Query);
+	return ((double)this->L1.Get_Num_Hits()/(double)this->L1.Get_Num_Query());
 }
 double Cache::Get_L2_Rate(){
-	return ((double)this->L2.Get_Num_Hits/(double)this->L2.Get_Num_Query);
+	return ((double)this->L2.Get_Num_Hits()/(double)this->L2.Get_Num_Query());
 }
 double Cache::Avg_Time(){
-	double tot_time = this->cnt_memory_time + this->L1.Get_Time + this->L2.Get_Time;
-	double tot_queries = this->Cnt_Requests + this->L1.Get_Num_Query + this->L2.Get_Num_Query;
+	double tot_time = this->cnt_memory_time + this->L1.Get_Time() + this->L2.Get_Time();
+	double tot_queries = this->Cnt_Requests + this->L1.Get_Num_Query() + this->L2.Get_Num_Query();
 	return (tot_time / tot_queries);
 }
